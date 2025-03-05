@@ -32,11 +32,24 @@ pub enum IcingaServiceState {
     Unknown = 3,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Serialize_repr, Deserialize_repr, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum IcingaHostState {
     Up = 0,
     Down = 1,
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(tag="type", content="exit_status")]
+pub enum IcingaState {
+    Host(IcingaHostState),
+    Service(IcingaServiceState),
+}
+
+impl Default for IcingaState {
+    fn default() -> Self {
+        Self::Service(Default::default())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,17 +68,16 @@ type Timestamp = u64;
 
 #[derive(Default, Debug, Clone, Serialize)]
 pub struct IcingaProcessResult {
-    #[serde(rename = "type")]
-    i_type: IcingaType,
-    exit_status: IcingaServiceState,
-    plugin_output: String,
+    #[serde(flatten)]
+    pub exit_status: IcingaState,
+    pub plugin_output: String,
     // Performance Data
-    check_command: Option<Vec<String>>,
-    check_source: Option<String>,
-    execution_start: Option<Timestamp>,
-    execution_end: Option<Timestamp>,
-    ttl: Option<Seconds>,
-    filter: String,
+    pub check_command: Option<Vec<String>>,
+    pub check_source: Option<String>,
+    pub execution_start: Option<Timestamp>,
+    pub execution_end: Option<Timestamp>,
+    pub ttl: Option<Seconds>,
+    pub filter: String,
 }
 
 #[derive(Debug, Clone)]
