@@ -1,7 +1,7 @@
-use std::{fmt::Display, path::PathBuf};
+use std::path::PathBuf;
 
 use base64::Engine;
-use reqwest::{Certificate, Identity, Proxy, header};
+use reqwest::{Certificate, Identity, Proxy, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -40,7 +40,7 @@ pub enum IcingaHostState {
 }
 
 #[derive(Serialize, Debug, Clone)]
-#[serde(tag="type", content="exit_status")]
+#[serde(tag = "type", content = "exit_status")]
 pub enum IcingaState {
     Host(IcingaHostState),
     Service(IcingaServiceState),
@@ -89,32 +89,22 @@ pub struct IcingaProcessResult {
     pub filter: String,
 }
 
-#[derive(Debug, Clone)]
-enum IcingaError {
-    SiteStatusNotify(String),
-    HostMonitorNotify(String),
-}
-impl std::error::Error for IcingaError {}
-impl Display for IcingaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SiteStatusNotify(err) => f.write_fmt(format_args!(
-                "Error notifying site status to icinga: {}",
-                err
-            )),
-            Self::HostMonitorNotify(err) => f.write_fmt(format_args!(
-                "Error notifying host monitor status to icinga: {}",
-                err
-            )),
-        }
-    }
+#[derive(thiserror::Error, Debug)]
+pub enum ReportToIcingaError {
+    #[error(transparent)]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Something went wrong while notifying icinga: {status} - {body:?}")]
+    IcingaError {
+        status: StatusCode,
+        body: IcingaReturn,
+    },
 }
 
 pub async fn report_to_icinga(
     config: &IcingaConfig,
     client: &reqwest::Client,
     result: &IcingaProcessResult,
-) -> Result<IcingaReturn, eyre::Error> {
+) -> Result<IcingaReturn, ReportToIcingaError> {
     println!("==REQ=> {:?}", result);
     let res = client
         .post(format!(
@@ -124,16 +114,16 @@ pub async fn report_to_icinga(
         .json(&result)
         .send()
         .await?;
-    if res.status().is_success() {
-        let ret: IcingaReturn = res.json().await?;
+    let status = res.status();
+    let ret: IcingaReturn = res.json().await?;
+    if status.is_success() {
         println!("<=RESP= {:?}", ret);
         Ok(ret)
     } else {
-        Err(eyre::Report::new(IcingaError::HostMonitorNotify(format!(
-            "Something went wrong while notifying icinga host monitor: {:?} - {}",
-            res.status(),
-            res.text().await?
-        ))))
+        Err(ReportToIcingaError::IcingaError {
+            status: status,
+            body: ret,
+        })
     }
 }
 
