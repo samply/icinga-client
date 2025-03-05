@@ -53,14 +53,14 @@ impl Default for IcingaState {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct IcingaReturn {
-    results: Vec<IcingaResult>,
+pub struct IcingaReturn {
+    pub results: Vec<IcingaResult>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct IcingaResult {
-    code: u32,
-    status: String,
+pub struct IcingaResult {
+    pub code: u32,
+    pub status: String,
 }
 
 type Seconds = usize;
@@ -114,8 +114,8 @@ pub async fn report_to_icinga(
     config: &IcingaConfig,
     client: &reqwest::Client,
     result: &IcingaProcessResult,
-) -> Result<(), eyre::Error> {
-    println!("==REQ=> {}", serde_json::to_string(&result).unwrap());
+) -> Result<IcingaReturn, eyre::Error> {
+    println!("==REQ=> {:?}", result);
     let res = client
         .post(format!(
             "{}/v1/actions/process-check-result",
@@ -125,8 +125,9 @@ pub async fn report_to_icinga(
         .send()
         .await?;
     if res.status().is_success() {
-        println!("<=RESP= {}", res.text().await?);
-        Ok(())
+        let ret: IcingaReturn = res.json().await?;
+        println!("<=RESP= {:?}", ret);
+        Ok(ret)
     } else {
         Err(eyre::Report::new(IcingaError::HostMonitorNotify(format!(
             "Something went wrong while notifying icinga host monitor: {:?} - {}",
@@ -141,7 +142,7 @@ pub fn reqwest_client_builder(config: &IcingaConfig) -> eyre::Result<reqwest::Cl
     let client_cert = load_certificate_from_path(&config.client_cert, &config.client_cert_pass)?;
 
     let version = String::from(env!("CARGO_PKG_VERSION"));
-    let user_agent = format!("ManagePKI/{}", version);
+    let user_agent = format!("icinga-client/{}", version);
     let mut client = reqwest::Client::builder()
         .tcp_nodelay(true)
         .user_agent(user_agent);
