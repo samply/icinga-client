@@ -69,14 +69,23 @@ type Timestamp = u64;
 #[derive(Default, Debug, Clone, Serialize)]
 pub struct IcingaProcessResult {
     #[serde(flatten)]
+    /// Required. The state of the Host or Service.
     pub exit_status: IcingaState,
+    /// Required. One or more lines of the plugin main output. Does not contain the performance data.
     pub plugin_output: String,
-    // Performance Data
+    /// Optional. The performance data as array of strings. The raw performance data string can be used too.
+    pub performance_data: Option<Vec<String>>,
+    /// Optional. The first entry should be the check commands path, then one entry for each command line option followed by an entry for each of its argument. Alternativly a single string can be used.
     pub check_command: Option<Vec<String>>,
+    /// Optional. Usually the name of the command_endpoint
     pub check_source: Option<String>,
+    /// Optional. The timestamp where a script/process started its execution.
     pub execution_start: Option<Timestamp>,
+    /// Optional. The timestamp where a script/process ended its execution. This timestamp is used in features to determine e.g. the metric timestamp.
     pub execution_end: Option<Timestamp>,
+    /// Optional. Time-to-live duration in seconds for this check result. The next expected check result is now + ttl where freshness checks are executed.
     pub ttl: Option<Seconds>,
+    /// Required. The expression that filters the objects the result applies to.
     pub filter: String,
 }
 
