@@ -1,27 +1,18 @@
-use std::{fmt::Display, fs, path::PathBuf};
+use std::{fmt::Display, path::PathBuf};
 
 use base64::Engine;
-use reqwest::{Certificate, Identity, Proxy, StatusCode, header};
+use reqwest::{Certificate, Identity, Proxy, header};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct IcingaConfig {
+pub struct IcingaConfig {
     icinga_url: String,
     ca_certificates: Option<PathBuf>,
     username: Option<String>,
     password: Option<String>,
     client_cert: Option<PathBuf>,
     client_cert_pass: Option<String>,
-    max_days: i32,
-    host_monitoring_name: String,
-    broker_id: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RunStats {
-    pub start: Timestamp,
-    pub end: Timestamp,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize)]
@@ -98,7 +89,7 @@ impl Display for IcingaError {
     }
 }
 
-async fn report_to_icinga(
+pub async fn report_to_icinga(
     config: &IcingaConfig,
     client: &reqwest::Client,
     result: &IcingaProcessResult,
@@ -113,7 +104,7 @@ async fn report_to_icinga(
         .send()
         .await?;
     if res.status().is_success() {
-        println!("<=RESP= {:?}", res.json::<IcingaReturn>().await?);
+        println!("<=RESP= {}", res.text().await?);
         Ok(())
     } else {
         Err(eyre::Report::new(IcingaError::HostMonitorNotify(format!(
@@ -124,144 +115,7 @@ async fn report_to_icinga(
     }
 }
 
-pub(crate) async fn send_site_status(
-    site: &str,
-    expiry: i32,
-    config: &IcingaConfig,
-    stats: RunStats,
-    client: &reqwest::Client,
-) -> eyre::Result<bool> {
-    let level = match expiry {
-        ..=0 => IcingaServiceState::Critical,
-        1.. if (1..config.max_days).contains(&expiry) => IcingaServiceState::Warning,
-        _ => IcingaServiceState::Ok,
-    };
-    let output = format!(
-        "The Beam certificate of {} expires in {} days",
-        site, expiry
-    );
-    let result = IcingaProcessResult {
-        exit_status: level,
-        plugin_output: output,
-        check_source: Some("Whatever".into()),
-        execution_start: Some(stats.start),
-        execution_end: Some(stats.end),
-        filter: format!(
-            "host.address==\"{}.{}\" && service.name == \"beam-cert-expiration\"",
-            site, config.broker_id
-        ),
-        ..Default::default()
-    };
-
-    println!(
-        "==REQ=> {}",
-        serde_json::to_string(&result).unwrap_or("Failed to serialize".into())
-    );
-
-    let res = client
-        .post(format!(
-            "{}/v1/actions/process-check-result",
-            config.icinga_url
-        ))
-        .json(&result)
-        .send()
-        .await?;
-    match res.status() {
-        x if x.is_success() => {
-            println!("<=RESP= {:?}", res.json::<IcingaReturn>().await?);
-            Ok(true)
-        }
-        StatusCode::INTERNAL_SERVER_ERROR => {
-            let body = res.json::<IcingaReturn>().await?;
-            if body.results.is_empty() {
-                // notify_icinga_host(true, vec![site], config, client).await?;
-                return Ok(false);
-            }
-            Err(eyre::Report::new(IcingaError::SiteStatusNotify(format!(
-                "Error 500 while notifying icinga for site {} - {:?}",
-                site, body
-            ))))
-        }
-        StatusCode::NOT_FOUND => {
-            println!("<=RESP= Site {site} not found in Icinga.");
-            Ok(false)
-        }
-        code => Err(eyre::Report::new(IcingaError::SiteStatusNotify(format!(
-            "Unknown Error while notifying icinga for site {} - {:?} - {}",
-            site,
-            code,
-            res.text().await?
-        )))),
-    }
-}
-
-pub(crate) async fn send_overall_status(
-    missing_sites: &mut [String],
-    error_sites: &mut [(String, eyre::Report)],
-    config: &IcingaConfig,
-    client: &reqwest::Client,
-) -> eyre::Result<()> {
-    let (level, output) = match (missing_sites.len(), error_sites.len()) {
-        (0, 0) => (
-            IcingaServiceState::Ok,
-            "All hosts present in Icinga.".to_string(),
-        ),
-        (missing, 0) => (
-            IcingaServiceState::Warning,
-            format!(
-                "{} hosts are missing in Icinga: {}",
-                missing,
-                missing_sites.join(",")
-            ),
-        ),
-        (missing, errors) => (
-            IcingaServiceState::Critical,
-            format!(
-                "{missing} hosts are missing. Also, error during reporting {errors} sites ({}); for example, reason for site 0: {}",
-                error_sites
-                    .iter()
-                    .map(|pair| pair.0.clone())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                error_sites.get(0).unwrap().1
-            ),
-        ),
-    };
-
-    report_to_icinga(
-        config,
-        client,
-        &IcingaProcessResult {
-            exit_status: IcingaServiceState::Ok,
-            plugin_output: "Check has executed successfully.".into(),
-            filter: format!(
-                "host.name==\"{}\" && service.name == \"beam-cert-monitor\"",
-                config.host_monitoring_name
-            ),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    report_to_icinga(
-        config,
-        client,
-        &IcingaProcessResult {
-            exit_status: level,
-            plugin_output: output,
-            filter: format!(
-                "host.name==\"{}\" && service.name == \"beam-cert-monitor-missinghosts\"",
-                config.host_monitoring_name
-            ),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    Ok(())
-}
-
-pub(crate) fn reqwest_client_builder(config: &IcingaConfig) -> eyre::Result<reqwest::Client> {
+pub fn reqwest_client_builder(config: &IcingaConfig) -> eyre::Result<reqwest::Client> {
     let tls_ca_certificates = load_certificates_from_dir(config.ca_certificates.clone())?;
     let client_cert = load_certificate_from_path(&config.client_cert, &config.client_cert_pass)?;
 
@@ -315,7 +169,7 @@ pub(crate) fn reqwest_client_builder(config: &IcingaConfig) -> eyre::Result<reqw
     Ok(client.build()?)
 }
 
-pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> eyre::Result<Vec<Certificate>> {
+fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> eyre::Result<Vec<Certificate>> {
     let mut result = Vec::new();
     if let Some(ca_dir) = ca_dir {
         for file in ca_dir.read_dir()? {
@@ -332,7 +186,7 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> eyre::Result<Vec<C
     Ok(result)
 }
 
-pub fn load_certificate_from_path(
+fn load_certificate_from_path(
     cert_file: &Option<PathBuf>,
     cert_pass: &Option<String>,
 ) -> eyre::Result<Option<Identity>> {
