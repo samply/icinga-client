@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use base64::Engine;
-use reqwest::{Certificate, Identity, Proxy, StatusCode, header};
+use reqwest::{Certificate, Identity, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tracing::info;
@@ -173,19 +173,19 @@ impl IcingaClient {
             client = client.add_root_certificate(cert.to_owned());
         }
         // Pare proxy and no_proxy configuration
-        let mut proxies: Vec<Proxy> = Vec::new();
-        let no_proxy = reqwest::NoProxy::from_env();
-        for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-            for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
-                unsafe { std::env::set_var(k.to_uppercase(), v.clone()) };
-                match k.as_str() {
-                    "http_proxy" => proxies.push(Proxy::http(v)?.no_proxy(no_proxy.clone())),
-                    "https_proxy" => proxies.push(Proxy::https(v)?.no_proxy(no_proxy.clone())),
-                    "all_proxy" => proxies.push(Proxy::all(v)?.no_proxy(no_proxy.clone())),
-                    _ => (),
-                };
-            }
-        }
+        // let mut proxies: Vec<Proxy> = Vec::new();
+        // let no_proxy = reqwest::NoProxy::from_env();
+        // for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
+        //     for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
+        //         unsafe { std::env::set_var(k.to_uppercase(), v.clone()) };
+        //         match k.as_str() {
+        //             "http_proxy" => proxies.push(Proxy::http(v)?.no_proxy(no_proxy.clone())),
+        //             "https_proxy" => proxies.push(Proxy::https(v)?.no_proxy(no_proxy.clone())),
+        //             "all_proxy" => proxies.push(Proxy::all(v)?.no_proxy(no_proxy.clone())),
+        //             _ => (),
+        //         };
+        //     }
+        // }
 
         Ok(IcingaClient {
             client: client.build()?,
