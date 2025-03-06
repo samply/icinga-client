@@ -63,8 +63,8 @@ pub struct IcingaResult {
     pub status: String,
 }
 
-type Seconds = usize;
-type Timestamp = u64;
+pub type Seconds = usize;
+pub type Timestamp = u64;
 
 #[derive(Default, Debug, Clone, Serialize)]
 pub struct IcingaProcessResult {
@@ -89,6 +89,11 @@ pub struct IcingaProcessResult {
     pub filter: String,
 }
 
+pub struct IcingaClient {
+    client: reqwest::Client,
+    config: IcingaConfig,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum ReportToIcingaError {
     #[error(transparent)]
@@ -100,85 +105,91 @@ pub enum ReportToIcingaError {
     },
 }
 
-pub async fn report_to_icinga(
-    config: &IcingaConfig,
-    client: &reqwest::Client,
-    result: &IcingaProcessResult,
-) -> Result<IcingaReturn, ReportToIcingaError> {
-    println!("==REQ=> {:?}", result);
-    let res = client
-        .post(format!(
-            "{}/v1/actions/process-check-result",
-            config.icinga_url
-        ))
-        .json(&result)
-        .send()
-        .await?;
-    let status = res.status();
-    let ret: IcingaReturn = res.json().await?;
-    if status.is_success() {
-        println!("<=RESP= {:?}", ret);
-        Ok(ret)
-    } else {
-        Err(ReportToIcingaError::IcingaError {
-            status: status,
-            body: ret,
-        })
-    }
-}
-
-pub fn reqwest_client_builder(config: &IcingaConfig) -> eyre::Result<reqwest::Client> {
-    let tls_ca_certificates = load_certificates_from_dir(config.ca_certificates.clone())?;
-    let client_cert = load_certificate_from_path(&config.client_cert, &config.client_cert_pass)?;
-
-    let version = String::from(env!("CARGO_PKG_VERSION"));
-    let user_agent = format!("icinga-client/{}", version);
-    let mut client = reqwest::Client::builder()
-        .tcp_nodelay(true)
-        .user_agent(user_agent);
-    // Set client cert auth
-    if let Some(cert) = client_cert {
-        client = client.identity(cert);
-    };
-    let mut headers = header::HeaderMap::new();
-    // Set headers for basic auth
-    if let Some(username) = &config.username {
-        let secret = format!(
-            "{}:{}",
-            username,
-            config
-                .password
-                .clone()
-                .expect("Icinga Username but no password given.")
-        );
-        let secret = base64::engine::general_purpose::STANDARD.encode(secret);
-        let mut secret = header::HeaderValue::from_str(&format!("Basic {}", secret))?;
-        secret.set_sensitive(true);
-        headers.insert(header::AUTHORIZATION, secret);
-    }
-    // Set Accept header
-    let accept = header::HeaderValue::from_str("application/json")?;
-    headers.insert(header::ACCEPT, accept);
-    client = client.default_headers(headers);
-    // Add trusted CA certs
-    for cert in tls_ca_certificates {
-        client = client.add_root_certificate(cert.to_owned());
-    }
-    // Pare proxy and no_proxy configuration
-    let mut proxies: Vec<Proxy> = Vec::new();
-    let no_proxy = reqwest::NoProxy::from_env();
-    for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-        for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
-            unsafe { std::env::set_var(k.to_uppercase(), v.clone()) };
-            match k.as_str() {
-                "http_proxy" => proxies.push(Proxy::http(v)?.no_proxy(no_proxy.clone())),
-                "https_proxy" => proxies.push(Proxy::https(v)?.no_proxy(no_proxy.clone())),
-                "all_proxy" => proxies.push(Proxy::all(v)?.no_proxy(no_proxy.clone())),
-                _ => (),
-            };
+impl IcingaClient {
+    pub async fn report_to_icinga(
+        &self,
+        result: &IcingaProcessResult,
+    ) -> Result<IcingaReturn, ReportToIcingaError> {
+        println!("==REQ=> {:?}", result);
+        let res = self.client
+            .post(format!(
+                "{}/v1/actions/process-check-result",
+                self.config.icinga_url
+            ))
+            .json(&result)
+            .send()
+            .await?;
+        let status = res.status();
+        let ret: IcingaReturn = res.json().await?;
+        if status.is_success() {
+            println!("<=RESP= {:?}", ret);
+            Ok(ret)
+        } else {
+            Err(ReportToIcingaError::IcingaError {
+                status: status,
+                body: ret,
+            })
         }
     }
-    Ok(client.build()?)
+
+    pub fn new(config: IcingaConfig) -> eyre::Result<IcingaClient> {
+        let tls_ca_certificates = load_certificates_from_dir(config.ca_certificates.clone())?;
+        let client_cert =
+            load_certificate_from_path(&config.client_cert, &config.client_cert_pass)?;
+
+        let version = String::from(env!("CARGO_PKG_VERSION"));
+        let user_agent = format!("icinga-client/{}", version);
+        let mut client = reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .user_agent(user_agent);
+        // Set client cert auth
+        if let Some(cert) = client_cert {
+            client = client.identity(cert);
+        };
+        let mut headers = header::HeaderMap::new();
+        // Set headers for basic auth
+        if let Some(username) = &config.username {
+            let secret = format!(
+                "{}:{}",
+                username,
+                config
+                    .password
+                    .clone()
+                    .expect("Icinga Username but no password given.")
+            );
+            let secret = base64::engine::general_purpose::STANDARD.encode(secret);
+            let mut secret = header::HeaderValue::from_str(&format!("Basic {}", secret))?;
+            secret.set_sensitive(true);
+            headers.insert(header::AUTHORIZATION, secret);
+        }
+        // Set Accept header
+        let accept = header::HeaderValue::from_str("application/json")?;
+        headers.insert(header::ACCEPT, accept);
+        client = client.default_headers(headers);
+        // Add trusted CA certs
+        for cert in tls_ca_certificates {
+            client = client.add_root_certificate(cert.to_owned());
+        }
+        // Pare proxy and no_proxy configuration
+        let mut proxies: Vec<Proxy> = Vec::new();
+        let no_proxy = reqwest::NoProxy::from_env();
+        for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
+            for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
+                unsafe { std::env::set_var(k.to_uppercase(), v.clone()) };
+                match k.as_str() {
+                    "http_proxy" => proxies.push(Proxy::http(v)?.no_proxy(no_proxy.clone())),
+                    "https_proxy" => proxies.push(Proxy::https(v)?.no_proxy(no_proxy.clone())),
+                    "all_proxy" => proxies.push(Proxy::all(v)?.no_proxy(no_proxy.clone())),
+                    _ => (),
+                };
+            }
+        }
+
+        Ok(IcingaClient {
+            client: client.build()?,
+            config: config,
+        })
+    }
 }
 
 fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> eyre::Result<Vec<Certificate>> {
