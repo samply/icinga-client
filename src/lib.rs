@@ -4,6 +4,7 @@ use base64::Engine;
 use reqwest::{Certificate, Identity, Proxy, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use tracing::info;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct IcingaConfig {
@@ -110,8 +111,9 @@ impl IcingaClient {
         &self,
         result: &IcingaProcessResult,
     ) -> Result<IcingaReturn, ReportToIcingaError> {
-        println!("==REQ=> {:?}", result);
-        let res = self.client
+        info!("==REQ=> {result:?}");
+        let res = self
+            .client
             .post(format!(
                 "{}/v1/actions/process-check-result",
                 self.config.icinga_url
@@ -121,8 +123,8 @@ impl IcingaClient {
             .await?;
         let status = res.status();
         let ret: IcingaReturn = res.json().await?;
+        info!("<=RESP= {status} {ret:?}");
         if status.is_success() {
-            println!("<=RESP= {:?}", ret);
             Ok(ret)
         } else {
             Err(ReportToIcingaError::IcingaError {
