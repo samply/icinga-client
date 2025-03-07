@@ -102,7 +102,8 @@ pub enum ReportToIcingaError {
     #[error("Something went wrong while notifying icinga: {status} - {body:?}")]
     IcingaError {
         status: StatusCode,
-        body: IcingaReturn,
+        body: Option<IcingaReturn>,
+        raw_body: String,
     },
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
@@ -127,13 +128,13 @@ impl IcingaClient {
         let status = res.status();
         let response_body= res.text().await?;
         info!("<=RESP= {status} {response_body}");
-        let ret: IcingaReturn = serde_json::from_str(&response_body)?;
         if status.is_success() {
-            Ok(ret)
+            Ok(serde_json::from_str(&response_body)?)
         } else {
             Err(ReportToIcingaError::IcingaError {
                 status: status,
-                body: ret,
+                body: serde_json::from_str(&response_body).ok(),
+                raw_body: response_body,
             })
         }
     }
