@@ -15,11 +15,13 @@ let content = fs::read_to_string(file)?;
 let config: MyAppConfig = toml::from_str(&content)?;
 ```
 
-Example TOML file:
+Example TOML config:
 
 ```toml
 [icinga_client]
-TODO
+icinga_url = "https://monitoring.verbis.dkfz.de"
+username = "icinga-user"
+password = "icinga-pass"
 ```
 
 When you have a config struct you can create an `IcingaClient` and send reports:
