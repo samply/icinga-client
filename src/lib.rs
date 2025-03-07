@@ -104,6 +104,8 @@ pub enum ReportToIcingaError {
         status: StatusCode,
         body: IcingaReturn,
     },
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 impl IcingaClient {
@@ -111,19 +113,21 @@ impl IcingaClient {
         &self,
         result: &IcingaProcessResult,
     ) -> Result<IcingaReturn, ReportToIcingaError> {
-        info!("==REQ=> {result:?}");
+        let request_body = serde_json::to_string(result)?;
+        info!("==REQ=> {request_body}");
         let res = self
             .client
             .post(format!(
                 "{}/v1/actions/process-check-result",
                 self.config.icinga_url
             ))
-            .json(&result)
+            .body(request_body)
             .send()
             .await?;
         let status = res.status();
-        let ret: IcingaReturn = res.json().await?;
-        info!("<=RESP= {status} {ret:?}");
+        let response_body= res.text().await?;
+        info!("<=RESP= {status} {response_body}");
+        let ret: IcingaReturn = serde_json::from_str(&response_body)?;
         if status.is_success() {
             Ok(ret)
         } else {
