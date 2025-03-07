@@ -36,7 +36,9 @@ icinga_client
         filter: "host.name==\"some-host\" && service.name==\"some-service\"".into(),
         ..Default::default()
     })
-    .await?;
+    .await
+    .inspect_err(|e| warn!("Failed to report to icinga: {e}"))
+    .ok();
 ```
 
 ## Samply bridgehead report convention
@@ -47,13 +49,11 @@ To attach a status report to a specific bridgehead, set a filter for `host.addre
 icinga_client
     .report_to_icinga(&icinga_client::IcingaProcessResult {
         exit_status: icinga_client::IcingaState::Service(icinga_client::IcingaServiceState::Ok),
-        plugin_output: "The bridgehead has a valid git token".into(),
-        filter: format!(
-            "host.address==\"{}.{}\" && service.name==\"git-token-rotation\"",
-            site,
-            broker_id
-        ),
+        plugin_output: "The frobnicator on {proxy_id} is doing fine".into(),
+        filter: format!("host.address==\"{proxy_id}\" && service.name==\"frobnicator\""),
         ..Default::default()
     })
-    .await?;
+    .await
+    .inspect_err(|e| warn!("Failed to report to icinga: {e}"))
+    .ok();
 ```
